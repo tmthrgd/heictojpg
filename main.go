@@ -40,7 +40,7 @@ type workUnit struct {
 }
 
 func (wrk *workUnit) convert(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "tifig", "-p", "-q", "100", wrk.path, wrk.newPath)
+	cmd := exec.CommandContext(ctx, "tifig", "-v", "-p", "-q", "100", wrk.path, wrk.newPath)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }
