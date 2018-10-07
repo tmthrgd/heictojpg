@@ -6,10 +6,7 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -24,8 +21,6 @@ import (
 	"github.com/tmthrgd/fasttemplate"
 )
 
-var pathSanitizer = strings.NewReplacer(":", "-")
-
 func newPath(tmpl *fasttemplate.Template, path string) string {
 	dir, file := filepath.Split(path)
 	ext := filepath.Ext(file)
@@ -33,89 +28,26 @@ func newPath(tmpl *fasttemplate.Template, path string) string {
 
 	return tmpl.ExecuteString(map[string]interface{}{
 		"path": path,
-
-		"dir": dir,
-
-		"file":  file,
-		"@file": pathSanitizer.Replace(file),
-
-		"name":  name,
-		"@name": pathSanitizer.Replace(name),
-
-		"ext": ext,
+		"dir":  dir,
+		"file": file,
+		"name": name,
+		"ext":  ext,
 	})
 }
 
-var variableSeparator = []byte{'='}
+type workUnit struct {
+	path, newPath string
+}
 
-func convert(ctx context.Context, wrk workUnit) error {
-	cmd := exec.CommandContext(ctx, "metaflac", "--export-tags-to=-", "--no-utf8-convert", wrk.path)
-
-	var buf bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &buf, os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	s := bufio.NewScanner(&buf)
-	meta := make(map[string]string)
-
-	for s.Scan() {
-		tok := bytes.SplitN(s.Bytes(), variableSeparator, 2)
-		if len(tok) < 2 {
-			return errors.New("invalid variable format")
-		}
-
-		meta[string(bytes.ToUpper(tok[0]))] = string(tok[1])
-	}
-
-	if s.Err() != nil {
-		return s.Err()
-	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	cmd1 := exec.CommandContext(ctx, "flac", "-c", "-d", wrk.path)
-	cmd2 := exec.CommandContext(ctx, "lame", "-b", "192", "-h",
-		"--tt", meta["TITLE"],
-		"--tn", meta["TRACKNUMBER"],
-		"--tg", meta["GENRE"],
-		"--ta", meta["ARTIST"],
-		"--tl", meta["ALBUM"],
-		"--ty", meta["DATE"],
-		"--add-id3v2",
-		"-", wrk.newPath)
-
-	cmd1.Stderr = os.Stderr
-	cmd2.Stdout, cmd2.Stderr = os.Stdout, os.Stderr
-
-	var err error
-	if cmd2.Stdin, err = cmd1.StdoutPipe(); err != nil {
-		return err
-	}
-
-	if err := cmd2.Start(); err != nil {
-		return err
-	}
-
-	if err := cmd1.Run(); err != nil {
-		os.Remove(wrk.newPath)
-		return err
-	}
-
-	if err := cmd2.Wait(); err != nil {
-		os.Remove(wrk.newPath)
-		return err
-	}
-
-	return nil
+func (wrk *workUnit) convert(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "tifig", "-p", "-q", "100", wrk.path, wrk.newPath)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
 func worker(ctx context.Context, ch <-chan workUnit, wg *sync.WaitGroup) {
 	for work := range ch {
-		if err := convert(ctx, work); err != nil {
+		if err := work.convert(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "<%s>: %v\n", work.path, err)
 		}
 
@@ -123,46 +55,33 @@ func worker(ctx context.Context, ch <-chan workUnit, wg *sync.WaitGroup) {
 	}
 }
 
-type workUnit struct {
-	path, newPath string
-}
-
-func fileIsFlac(path string) (bool, error) {
-	if filepath.Ext(path) == ".flac" {
-		return true, nil
+func fileIsHEIC(path string) bool {
+	switch strings.ToUpper(filepath.Ext(path)) {
+	case ".HEIC", ".HEIF":
+		return true
+	default:
+		return false
 	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	var buf [4]byte
-	_, err = f.Read(buf[:])
-	return string(buf[:]) == "fLaC", err
 }
 
 func main() {
-	outPath := flag.String("out", "{dir}.{@file}.mp3", "the output path template")
+	outPath := flag.String("out", "{dir}{file}.jpg", "the output path template")
 	recurse := flag.Bool("recurse", true, "whether to walk into child directories")
 	flag.Parse()
 
-	for _, name := range [...]string{"metaflac", "flac", "lame"} {
-		if _, err := exec.LookPath(name); err != nil {
-			log.Fatal(err)
-		}
+	if _, err := exec.LookPath("tifig"); err != nil {
+		log.Fatal(err)
 	}
 
 	var wg sync.WaitGroup
 
-	work := make(chan workUnit, 32)
+	work := make(chan workUnit)
 	defer close(work)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	for i := 0; i < cap(work); i++ {
+	for i := 0; i < 32; i++ {
 		go worker(ctx, work, &wg)
 	}
 
@@ -189,8 +108,8 @@ func main() {
 			return nil
 		}
 
-		if flac, err := fileIsFlac(path); err != nil || !flac {
-			return err
+		if !fileIsHEIC(path) {
+			return nil
 		}
 
 		newPath := newPath(pathTmpl, path)
