@@ -2,6 +2,12 @@
 
 heictojpg small utility to recursively convert HEIC image files to JPGs.
 
+## Installation:
+
+`go get tmthrgd.dev/go/heictojpg`
+
+## Usage:
+
 It takes two flags:
 
 - `-recurse` (default `true`) that controls whether or not it descends recursively into sub-directories, and
