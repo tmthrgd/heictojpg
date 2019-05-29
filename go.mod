@@ -1,4 +1,4 @@
-module tmthrgd.dev/go/heictojpg
+module go.tmthrgd.dev/heictojpg
 
 go 1.12
 

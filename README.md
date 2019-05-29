@@ -4,7 +4,7 @@ heictojpg small utility to recursively convert HEIC image files to JPGs.
 
 ## Installation:
 
-`go get tmthrgd.dev/go/heictojpg`
+`go get go.tmthrgd.dev/heictojpg`
 
 ## Usage:
 
